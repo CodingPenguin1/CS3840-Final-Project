@@ -60,7 +60,7 @@ def render(env, model=None):
     done = False
     score = 0
     env.render()
-    sleep(5)
+    sleep(2)
 
     while not done:
         env.render()
