@@ -92,7 +92,7 @@ if __name__ == '__main__':
                 render(env, model)
 
     elif option.startswith('e'):
-        eval(env, model=None)
+        evaluate(env, model=None)
 
     elif option.startswith('r'):
         render(env, model=None)
