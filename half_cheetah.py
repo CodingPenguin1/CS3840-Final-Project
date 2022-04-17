@@ -1,64 +1,94 @@
 #!/usr/bin/env python
 import os
+import statistics
 from datetime import timedelta
-from time import time, sleep
-
+from time import sleep, time
 import gym
+import numpy as np
 from stable_baselines3 import DDPG
-from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import DummyVecEnv
-
-
-def load_model_from_file(env):
-    models = [file[:-4] for file in os.listdir('Saved_Models')]
-    for i, model in enumerate(models):
-        print(f'{i+1}. {model}')
-    option = int(input('Which model? '))
-    return DDPG.load(os.path.join('Saved_Models', models[option - 1]), env=env)
 
 
 def train(env, timesteps):
     train_start = time()
 
-    model = DDPG('MlpPolicy', env, verbose=1, tensorboard_log='Training_Logs')
-    model.learn(total_timesteps=timesteps)
-    model.save(os.path.join('Saved_Models', f'half_cheetah_ddpg-{int(timesteps/1000)}k'))
+    model = DDPG('MlpPolicy', env, verbose=1, tensorboard_log='Tensorboard_Logs')
+
+    model_name = f'DDPG-{int(timesteps/1000)}k'
+    model.learn(total_timesteps=timesteps,
+                tb_log_name=model_name,
+                eval_env=env,
+                eval_freq=10000,
+                n_eval_episodes=50,
+                eval_log_path=os.path.join('Training_Logs', model_name))
+
+    # model.save(os.path.join('Saved_Models', f'half_cheetah_ddpg-{int(timesteps/1000)}k'))
 
     train_duration = time() - train_start
     print(f'Training completed in {timedelta(seconds=train_duration)}')
 
-    return model
+    return model, model_name
 
 
-def evaluate(env, model=None):
+def evaluate(env, model_name=None):
     # Load model from file
-    if model is None:
-        model = load_model_from_file(env)
+    if model_name is None:
+        models = list(os.listdir('Training_Logs'))
+        for i, model in enumerate(models):
+            print(f'{i+1}. {model}')
+        option = int(input('Which model? '))
+        model_name = models[option - 1]
+        filepath = os.path.join('Training_Logs', models[option - 1], 'evaluations.npz')
+    else:
+        filepath = os.path.join('Training_Logs', model_name, 'evaluations.npz')
 
+    # === Training Evaluation === #
+    # Used npzviewer to determine keys of npz file (`pip install npzviewer`)
+    # In this case, they are `ep_lengths`, `results`, `timesteps`
+    with np.load(filepath) as data:
+        print('\n\033[4mTraining Evaluation\033[0m')
+        print('{:<12}{:<10}{:<10}'.format('Timesteps', 'Average', 'Std'))
+        for i in range(len(data['timesteps'])):
+            timesteps = data['timesteps'][i]
+            average = round(sum(data['results'][i]) / len(data['results'][i]), 2)
+            stdev = round(statistics.pstdev(data['results'][i]), 2)
+            print('{:<12}{:<10}{:<10}'.format(timesteps, average, stdev))
 
-    episodes = 5
-    for episode in range(episodes):
+    # === Best Model Evaluation === #
+    model = DDPG.load(os.path.join('Training_Logs', model_name, 'best_model'), env=env)
+    episodes = 50
+    scores = []
+    for _ in range(episodes):
         obs = env.reset()
         done = False
         score = 0
 
         while not done:
-            # env.render()
             action, _ = model.predict(obs)
             obs, reward, done, info = env.step(action)
             score += reward
-        print(f'Episode {episode+1} finished with score {score}')
-    env.close()
+        scores.append(float(score))
+
+    print('\n\033[4mBest Model Evaluation\033[0m')
+    # Doing this because for some reason `import numpy as np` is overriding `builtin.sum()`
+    average = round(sum(scores) / len(scores), 2)
+    stdev = round(statistics.pstdev(scores), 2)
+    print('{:<10}{:<10}'.format('Average', 'Std'))
+    print('{:<10}{:<10}'.format(average, stdev))
 
 
 def render(env, model=None):
     # Load model from file
     if model is None:
-        model = load_model_from_file(env)
+        models = list(os.listdir('Training_Logs'))
+        for i, model in enumerate(models):
+            print(f'{i+1}. {model}')
+        option = int(input('Which model? '))
+        filepath = os.path.join('Training_Logs', models[option - 1], 'best_model.zip')
+        model = DDPG.load(filepath, env=env)
 
     obs = env.reset()
     done = False
-    score = 0
     env.render()
     sleep(2)
 
@@ -66,33 +96,28 @@ def render(env, model=None):
         env.render()
         action, _ = model.predict(obs)
         obs, reward, done, info = env.step(action)
-        score += reward
 
 
 if __name__ == '__main__':
     env = gym.make('HalfCheetah-v2')
     env = DummyVecEnv([lambda: env])
 
-    # Env spaces are both boxes
-    # print(env.observation_space)
-    # print(env.action_space)
-
     option = input('Train, evaluate, or render [T/e/r]? ').lower()
 
     if option.startswith('t') or not len(option):
-        timesteps = int(input('How many timesteps? '))
-        model = train(env, timesteps)
+        timesteps = int(input('How many timesteps (in thousands)? '))
+        model, model_name = train(env, timesteps * 1000)
 
-        option = input('Evaluate [Y/n]? ').lower()
-        if option == 'y' or not len(option):
-            evaluate(env, model)
+        eval_option = input('Evaluate [Y/n]? ').lower()
+        if eval_option == 'y' or not len(eval_option):
+            evaluate(env, model_name)
 
-            option = input('Render [Y/n]? ').lower()
-            if option == 'y' or not len(option):
+            render_option = input('Render [y/N]? ').lower()
+            if render_option == 'y':
                 render(env, model)
 
     elif option.startswith('e'):
-        evaluate(env, model=None)
+        evaluate(env, model_name=None)
 
     elif option.startswith('r'):
         render(env, model=None)
