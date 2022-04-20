@@ -22,8 +22,6 @@ def train(env, timesteps):
                 n_eval_episodes=50,
                 eval_log_path=os.path.join('Training_Logs', model_name))
 
-    # model.save(os.path.join('Saved_Models', f'half_cheetah_ddpg-{int(timesteps/1000)}k'))
-
     train_duration = time() - train_start
     print(f'Training completed in {timedelta(seconds=train_duration)}')
 
